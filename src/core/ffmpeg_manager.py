@@ -8,6 +8,18 @@ from typing import Optional
 from dataclasses import dataclass
 
 
+def _run_subprocess(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
+    """Ejecuta subprocess con decodificación segura en Windows (evita cp1252 crash)."""
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
 @dataclass
 class FFmpegInfo:
     available: bool
@@ -49,12 +61,7 @@ class FFmpegManager:
             return self._info
 
         try:
-            result = subprocess.run(
-                ["ffmpeg", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            result = _run_subprocess(["ffmpeg", "-version"], timeout=10)
             version = "desconocida"
             if result.returncode == 0 and result.stdout:
                 first = result.stdout.split("\n")[0]
@@ -97,7 +104,7 @@ class FFmpegManager:
                 "-show_streams",
                 str(file_path),
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = _run_subprocess(cmd, timeout=30)
             if result.returncode != 0:
                 return ProbeResult(
                     success=False,
@@ -166,12 +173,7 @@ class FFmpegManager:
         timeout: int = 600,
     ) -> tuple[bool, str]:
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            result = _run_subprocess(cmd, timeout=timeout)
             if result.returncode == 0:
                 return True, ""
             err = (result.stderr or result.stdout or "Error desconocido de FFmpeg")[:500]

@@ -16,16 +16,18 @@ from src.models.audio_file import (
     BitratePreset,
     SampleRatePreset,
 )
-from src.models.conversion import ConversionOptions, ConversionRecord
+from src.models.conversion import BatchConversionResult, ConversionOptions, ConversionRecord
 from src.core.converter import AudioConverter
 from src.core.dependencies import DependencyChecker
 from src.core.exporter import HistoryExporter
 from src.core.history import HistoryService
 from src.core.metadata import MetadataHandler
+from src.core.removable import MAX_TREE_DEPTH, RemovableDevice, RemovableMediaManager
 from src.core.scanner import AudioScanner
+from src.core.session_report import SessionReportWriter
 from src.core.validator import Validator
 from src.ui.progress import batch_progress, conversion_progress
-from src.utils.helpers import format_duration
+from src.utils.helpers import format_duration, format_size
 from src.utils.paths import PathManager
 
 
@@ -49,6 +51,8 @@ class Menus:
         self.history = history
         self.exporter = exporter
         self.scanner = scanner
+        self.removable = RemovableMediaManager(max_depth=MAX_TREE_DEPTH)
+        self.session_reports = SessionReportWriter(self.paths.exports_dir)
 
     def show_main_menu(self) -> None:
         self.console.print("\n[bold]═══ MENÚ PRINCIPAL ═══[/bold]\n")
@@ -58,12 +62,13 @@ class Menus:
         table.add_row("1", "Convertir un archivo")
         table.add_row("2", "Convertir varios archivos")
         table.add_row("3", "Convertir una carpeta completa")
-        table.add_row("4", "Editar metadatos")
-        table.add_row("5", "Ver información del archivo")
-        table.add_row("6", "Historial")
-        table.add_row("7", "Exportar historial")
-        table.add_row("8", "Configuración")
-        table.add_row("9", "Verificar dependencias")
+        table.add_row("4", "Convertir desde USB / extraíble")
+        table.add_row("5", "Editar metadatos")
+        table.add_row("6", "Ver información del archivo")
+        table.add_row("7", "Historial")
+        table.add_row("8", "Exportar historial")
+        table.add_row("9", "Configuración")
+        table.add_row("10", "Verificar dependencias")
         table.add_row("0", "Salir")
         self.console.print(table)
 
@@ -162,6 +167,274 @@ class Menus:
             return
 
         self._run_batch(files)
+
+    def convert_from_usb(self) -> None:
+        self.console.print("\n[bold cyan]═══ CONVERTIR DESDE USB / EXTRAÍBLE ═══[/bold cyan]\n")
+        self.console.print(
+            f"[dim]Navegación limitada a {MAX_TREE_DEPTH} niveles desde la raíz del dispositivo[/dim]\n"
+        )
+
+        device = self._select_removable_device()
+        if device is None:
+            return
+
+        selection = self._browse_removable_device(device)
+        if selection is None:
+            return
+
+        files, source_label = selection
+        if not files:
+            self.console.print("[yellow]No hay archivos de audio para convertir[/yellow]")
+            return
+
+        options = self._ask_conversion_options()
+        if options is None:
+            return
+
+        pre = SessionReportWriter.format_pre_summary(
+            device_label=device.label,
+            device_path=device.path,
+            source_label=source_label,
+            files=files,
+            options=options,
+        )
+        self.console.print("\n[bold]Resumen previo a la conversión[/bold]")
+        self.console.print(Panel(pre, box=box.ROUNDED, title="Antes", border_style="cyan"))
+
+        if not Confirm.ask("\n¿Confirmar e iniciar conversión?", default=True):
+            self.console.print("[yellow]Conversión cancelada[/yellow]")
+            return
+
+        started_at = datetime.now()
+        batch = self._execute_conversion_batch(files, options)
+        finished_at = datetime.now()
+
+        self._print_post_summary(batch, options)
+
+        md_path, txt_path = self.session_reports.write_session(
+            device_label=device.label,
+            device_path=device.path,
+            source_label=source_label,
+            files=files,
+            options=options,
+            batch=batch,
+            username=self.paths.username,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        self.console.print("\n[green]✓ Reportes actualizados[/green]")
+        self.console.print(f"[dim]MD:  {md_path}[/dim]")
+        self.console.print(f"[dim]TXT: {txt_path}[/dim]")
+
+    def _select_removable_device(self) -> Optional[RemovableDevice]:
+        while True:
+            self.console.print("[cyan]Buscando dispositivos extraíbles...[/cyan]")
+            devices = self.removable.list_devices()
+
+            if not devices:
+                self.console.print("[yellow]No se detectaron dispositivos extraíbles[/yellow]")
+                self.console.print("[dim]Conecte un USB y use la opción Actualizar[/dim]\n")
+            else:
+                table = Table(box=box.ROUNDED, title="Dispositivos detectados")
+                table.add_column("#", style="cyan", justify="center")
+                table.add_column("Etiqueta", style="white")
+                table.add_column("Ruta", style="green")
+                table.add_column("Espacio", style="dim")
+                for i, device in enumerate(devices, 1):
+                    space = "-"
+                    if device.free_gb is not None and device.total_gb is not None:
+                        space = f"{device.free_gb:.1f}/{device.total_gb:.1f} GB"
+                    table.add_row(str(i), device.label, str(device.path), space)
+                self.console.print(table)
+
+            table = Table(box=box.SIMPLE, show_header=False)
+            table.add_column("Opción", style="cyan", justify="center")
+            table.add_column("Acción")
+            if devices:
+                table.add_row("1-" + str(len(devices)), "Seleccionar dispositivo")
+            table.add_row("R", "Actualizar lista")
+            table.add_row("0", "Cancelar")
+            self.console.print(table)
+
+            choice = Prompt.ask("Seleccione", default="0").strip().lower()
+            if choice in {"0", ""}:
+                return None
+            if choice == "r":
+                continue
+            if devices and choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(devices):
+                    selected = devices[idx - 1]
+                    self.console.print(f"[green]✓ Dispositivo: {selected.display}[/green]")
+                    return selected
+            self.console.print("[red]Opción no válida[/red]")
+
+    def _browse_removable_device(
+        self,
+        device: RemovableDevice,
+    ) -> Optional[tuple[list[Path], str]]:
+        current = device.path
+        root = device.path
+        page_size = 40
+        audio_offset = 0
+
+        while True:
+            depth = self.removable.depth_from_root(root, current)
+            if depth < 0:
+                self.console.print("[red]Ruta fuera del dispositivo[/red]")
+                current = root
+                depth = 0
+                audio_offset = 0
+
+            entries = self.removable.list_directory(root, current)
+            folders = [e for e in entries if e.is_dir]
+            audios = [e for e in entries if e.is_audio]
+            page = audios[audio_offset: audio_offset + page_size]
+            has_more = audio_offset + page_size < len(audios)
+            has_prev = audio_offset > 0
+
+            self.console.print(
+                f"\n[bold]Explorando:[/bold] {current}  "
+                f"[dim](nivel {depth}/{MAX_TREE_DEPTH}) | "
+                f"{len(folders)} carpetas | {len(audios)} audios[/dim]"
+            )
+
+            table = Table(box=box.ROUNDED)
+            table.add_column("#", style="cyan", justify="center", width=6)
+            table.add_column("Tipo", width=10)
+            table.add_column("Nombre", style="white", max_width=60)
+            table.add_column("Info", style="dim")
+
+            row_map: dict[int, object] = {}
+            n = 1
+            for folder in folders:
+                can_open = self.removable.can_enter(root, folder.path)
+                info = "entrar" if can_open else f"máx. {MAX_TREE_DEPTH} niveles"
+                name = folder.name if len(folder.name) <= 60 else folder.name[:57] + "..."
+                table.add_row(str(n), "Carpeta", name, info)
+                row_map[n] = ("dir", folder)
+                n += 1
+            for audio in page:
+                size = format_size(audio.size_bytes) if audio.size_bytes is not None else "-"
+                name = audio.name if len(audio.name) <= 60 else audio.name[:57] + "..."
+                table.add_row(str(n), "Audio", name, size)
+                row_map[n] = ("file", audio)
+                n += 1
+
+            if not row_map and not audios:
+                self.console.print("[yellow]Carpeta vacía (sin subcarpetas ni audio visible)[/yellow]")
+            else:
+                self.console.print(table)
+                if len(audios) > page_size:
+                    end = min(audio_offset + page_size, len(audios))
+                    self.console.print(
+                        f"[dim]Audios {audio_offset + 1}-{end} de {len(audios)} "
+                        f"(use N/P para paginar; A/B convierte todos)[/dim]"
+                    )
+
+            actions = Table(box=box.SIMPLE, show_header=False)
+            actions.add_column("Opción", style="cyan", justify="center")
+            actions.add_column("Acción")
+            if row_map:
+                actions.add_row("1-" + str(max(row_map)), "Abrir carpeta o seleccionar archivo")
+            actions.add_row("A", "Convertir todo el audio de esta carpeta (solo nivel actual)")
+            actions.add_row("B", f"Convertir carpeta + subcarpetas (máx. nivel {MAX_TREE_DEPTH})")
+            if has_more:
+                actions.add_row("N", "Siguiente página de audios")
+            if has_prev:
+                actions.add_row("P", "Página anterior de audios")
+            if depth > 0:
+                actions.add_row("U", "Subir un nivel")
+            actions.add_row("0", "Cancelar")
+            self.console.print(actions)
+
+            choice = Prompt.ask("Seleccione", default="0").strip().lower()
+            if choice in {"0", ""}:
+                return None
+            if choice == "u" and depth > 0:
+                current = current.parent
+                audio_offset = 0
+                continue
+            if choice == "n" and has_more:
+                audio_offset += page_size
+                continue
+            if choice == "p" and has_prev:
+                audio_offset = max(0, audio_offset - page_size)
+                continue
+            if choice == "a":
+                files = self.removable.scan_audio(root, current, recursive=False)
+                if not files:
+                    self.console.print("[yellow]No hay audio en este nivel[/yellow]")
+                    continue
+                return files, f"Carpeta (nivel actual): {current}"
+            if choice == "b":
+                files = self.removable.scan_audio(root, current, recursive=True)
+                if not files:
+                    self.console.print("[yellow]No hay audio en el alcance permitido[/yellow]")
+                    continue
+                return files, f"Carpeta + subcarpetas (≤{MAX_TREE_DEPTH}): {current}"
+            if choice.isdigit():
+                idx = int(choice)
+                if idx in row_map:
+                    kind, entry = row_map[idx]
+                    if kind == "dir":
+                        if self.removable.can_enter(root, entry.path):
+                            current = entry.path
+                            audio_offset = 0
+                        else:
+                            self.console.print(
+                                f"[yellow]No se puede entrar: límite de {MAX_TREE_DEPTH} niveles[/yellow]"
+                            )
+                        continue
+                    return [entry.path], f"Archivo: {entry.path}"
+            self.console.print("[red]Opción no válida[/red]")
+
+    def _execute_conversion_batch(
+        self,
+        files: list[Path],
+        options: ConversionOptions,
+    ) -> BatchConversionResult:
+        self.console.print(f"\n[cyan]Convirtiendo {len(files)} archivo(s)...[/cyan]")
+        with batch_progress(self.console) as progress:
+            task = progress.add_task("USB", total=len(files))
+
+            def on_item(index: int, total: int, path: Path) -> None:
+                progress.update(task, completed=index - 1, description=path.name)
+
+            batch = self.converter.convert_batch(files, options, progress_callback=on_item)
+            progress.update(task, completed=len(files), description="Completado")
+
+        for result in batch.results:
+            self.history.add_from_result(
+                result,
+                username=self.paths.username,
+                sample_rate=options.sample_rate.value,
+            )
+        return batch
+
+    def _print_post_summary(
+        self,
+        batch: BatchConversionResult,
+        options: ConversionOptions,
+    ) -> None:
+        lines = [
+            f"Total: {batch.total}",
+            f"Éxito: {batch.success}",
+            f"Fallos: {batch.failed}",
+            f"Omitidos: {batch.skipped}",
+            f"Formato: {options.output_format.value.upper()}",
+            f"Salida: {options.output_dir or self.paths.converted_dir}",
+            "",
+            "Detalle:",
+        ]
+        for result in batch.results:
+            mark = "OK" if result.success else "ERROR"
+            target = result.output_path.name if result.output_path else "-"
+            extra = f" | {result.error_message}" if result.error_message else ""
+            lines.append(f"  [{mark}] {result.input_path.name} -> {target}{extra}")
+
+        self.console.print("\n[bold]Resumen posterior a la conversión[/bold]")
+        self.console.print(Panel("\n".join(lines), box=box.ROUNDED, title="Después", border_style="green"))
 
     def edit_metadata(self) -> None:
         self.console.print("\n[bold cyan]═══ EDITAR METADATOS ═══[/bold cyan]\n")

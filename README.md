@@ -70,14 +70,23 @@ python src/main.py
 1. Convertir un archivo
 2. Convertir varios archivos
 3. Convertir una carpeta completa
-4. Editar metadatos
-5. Ver información del archivo
-6. Historial
-7. Exportar historial
-8. Configuración
-9. Verificar dependencias
+4. Convertir desde USB / extraíble
+5. Editar metadatos
+6. Ver información del archivo
+7. Historial
+8. Exportar historial
+9. Configuración
+10. Verificar dependencias
 0. Salir
 ```
+
+### Conversión desde USB
+
+1. Detecta unidades extraíbles conectadas.
+2. Permite navegar el árbol del dispositivo hasta un máximo de **5 niveles** desde la raíz.
+3. Convierte un archivo o un lote (carpeta actual o con subcarpetas dentro del límite).
+4. Muestra resumen **antes** y **después** de la conversión.
+5. Crea/actualiza reportes en `exports/usb_conversion_summary.md` y `.txt`.
 
 ## Estructura del proyecto
 

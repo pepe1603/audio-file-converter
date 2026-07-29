@@ -97,7 +97,7 @@ class AudioFileConverterApp:
 
             choice = Prompt.ask(
                 "\nSeleccione una opción",
-                choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+                choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
                 default="0",
             )
 
@@ -105,12 +105,13 @@ class AudioFileConverterApp:
                 "1": self.menus.convert_single,
                 "2": self.menus.convert_multiple,
                 "3": self.menus.convert_folder,
-                "4": self.menus.edit_metadata,
-                "5": self.menus.show_file_info,
-                "6": self.menus.history_menu,
-                "7": self.menus.export_history,
-                "8": self.menus.settings_menu,
-                "9": self.menus.check_dependencies,
+                "4": self.menus.convert_from_usb,
+                "5": self.menus.edit_metadata,
+                "6": self.menus.show_file_info,
+                "7": self.menus.history_menu,
+                "8": self.menus.export_history,
+                "9": self.menus.settings_menu,
+                "10": self.menus.check_dependencies,
             }
 
             if choice == "0":
