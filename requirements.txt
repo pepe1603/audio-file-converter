@@ -1,0 +1,6 @@
+ffmpeg-python>=0.2.0
+mutagen>=1.47.0
+rich>=13.7.0
+typer>=0.16.0
+pydantic>=2.8.0
+platformdirs>=4.2.0
