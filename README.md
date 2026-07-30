@@ -4,6 +4,8 @@ CLI multiplataforma para convertir archivos de audio entre múltiples formatos u
 
 **Versión estable:** `1.1.0`
 
+**Documentación:** [Guía completa de uso](docs/guia_completa.md) — cada opción del menú, resultados y ejemplos reales.
+
 ## Características
 
 - Conversión entre múltiples formatos de audio
@@ -68,6 +70,8 @@ pip install -r requirements.txt
 ```bash
 python src/main.py
 ```
+
+Para el detalle de **todas las opciones, resultados y ejemplos**, consulta la [guía completa](docs/guia_completa.md).
 
 ### Menú principal
 
