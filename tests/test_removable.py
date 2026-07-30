@@ -1,11 +1,13 @@
 """Tests de dispositivos extraíbles y profundidad de árbol."""
 
+from datetime import datetime
 from pathlib import Path
 
 from src.core.removable import MAX_TREE_DEPTH, RemovableMediaManager
 from src.core.session_report import SessionReportWriter
 from src.models.audio_file import AudioFormat, BitratePreset, SampleRatePreset
 from src.models.conversion import BatchConversionResult, ConversionOptions, ConversionResult
+from src.utils.paths import USB_CONVERTED_PREFIX, PathManager
 
 
 def _make_tree(root: Path) -> None:
@@ -110,3 +112,49 @@ def test_session_report_create_and_update(tmp_path: Path):
     content2 = md1.read_text(encoding="utf-8")
     assert content2.count("## Sesión") == 2
     assert MAX_TREE_DEPTH == 5
+
+
+def test_removable_pc_session_dir(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(PathManager, "_detect_environment", lambda self: __import__(
+        "src.utils.paths", fromlist=["EnvironmentType"]
+    ).EnvironmentType.WINDOWS)
+    monkeypatch.setattr(PathManager, "_resolve_base_path", lambda self: tmp_path / "AudioConverter")
+    monkeypatch.setattr(
+        PathManager,
+        "_resolve_config_path",
+        lambda self: tmp_path / "config",
+    )
+    paths = PathManager()
+    when = datetime(2026, 7, 30, 14, 30, 0)
+    session = paths.removable_pc_session_dir("USB TEST", when=when, create=True)
+    assert session == paths.converted_dir / "from_removable" / "USB_TEST" / "2026-07-30_143000"
+    assert session.is_dir()
+
+
+def test_removable_usb_session_dir_single_file(tmp_path: Path):
+    music = tmp_path / "Music"
+    music.mkdir()
+    src = music / "song.wav"
+    src.write_bytes(b"RIFF")
+    when = datetime(2026, 7, 30, 14, 30, 0)
+    session = PathManager.removable_usb_session_dir(
+        [src], tmp_path, when=when, create=True
+    )
+    assert session == music / f"{USB_CONVERTED_PREFIX}_20260730_143000"
+    assert session.is_dir()
+
+
+def test_removable_usb_session_dir_common_parent(tmp_path: Path):
+    album = tmp_path / "Album"
+    (album / "a").mkdir(parents=True)
+    (album / "b").mkdir(parents=True)
+    f1 = album / "a" / "1.mp3"
+    f2 = album / "b" / "2.mp3"
+    f1.write_bytes(b"ID3")
+    f2.write_bytes(b"ID3")
+    when = datetime(2026, 1, 2, 3, 4, 5)
+    session = PathManager.removable_usb_session_dir(
+        [f1, f2], tmp_path, when=when, create=False
+    )
+    assert session == album / f"{USB_CONVERTED_PREFIX}_20260102_030405"
+    assert not session.exists()

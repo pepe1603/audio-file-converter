@@ -32,6 +32,7 @@ class SessionReportWriter:
         username: str,
         started_at: datetime,
         finished_at: Optional[datetime] = None,
+        destination_label: str = "",
     ) -> tuple[Path, Path]:
         finished_at = finished_at or datetime.now()
         stamp = finished_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -47,6 +48,7 @@ class SessionReportWriter:
             username=username,
             started_at=started_at,
             finished_at=finished_at,
+            destination_label=destination_label,
         )
         txt_block = self._build_txt(
             stamp=stamp,
@@ -59,6 +61,7 @@ class SessionReportWriter:
             username=username,
             started_at=started_at,
             finished_at=finished_at,
+            destination_label=destination_label,
         )
 
         self._append_md(md_block)
@@ -112,6 +115,7 @@ class SessionReportWriter:
         username: str,
         started_at: datetime,
         finished_at: datetime,
+        destination_label: str = "",
     ) -> str:
         lines = [
             f"## Sesión {stamp}",
@@ -120,20 +124,27 @@ class SessionReportWriter:
             f"- **Dispositivo:** {device_label}",
             f"- **Ruta dispositivo:** `{device_path}`",
             f"- **Origen:** {source_label}",
-            f"- **Inicio:** {started_at.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"- **Fin:** {finished_at.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"- **Formato destino:** {options.output_format.value.upper()}",
-            f"- **Bitrate:** {options.bitrate.description}",
-            f"- **Sample rate:** {options.sample_rate.description}",
-            f"- **Metadatos:** {'Sí' if options.preserve_metadata else 'No'}",
-            f"- **Total archivos:** {batch.total}",
-            f"- **Éxito:** {batch.success}",
-            f"- **Fallos:** {batch.failed}",
-            f"- **Omitidos:** {batch.skipped}",
-            "",
-            "### Archivos",
-            "",
         ]
+        if destination_label:
+            lines.append(f"- **Destino:** {destination_label}")
+        lines.extend(
+            [
+                f"- **Inicio:** {started_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"- **Fin:** {finished_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"- **Formato destino:** {options.output_format.value.upper()}",
+                f"- **Bitrate:** {options.bitrate.description}",
+                f"- **Sample rate:** {options.sample_rate.description}",
+                f"- **Metadatos:** {'Sí' if options.preserve_metadata else 'No'}",
+                f"- **Carpeta salida:** `{options.output_dir}`",
+                f"- **Total archivos:** {batch.total}",
+                f"- **Éxito:** {batch.success}",
+                f"- **Fallos:** {batch.failed}",
+                f"- **Omitidos:** {batch.skipped}",
+                "",
+                "### Archivos",
+                "",
+            ]
+        )
         for result in batch.results:
             status = "OK" if result.success else "ERROR"
             out = result.output_path or "-"
@@ -158,6 +169,7 @@ class SessionReportWriter:
         username: str,
         started_at: datetime,
         finished_at: datetime,
+        destination_label: str = "",
     ) -> str:
         lines = [
             f"SESION {stamp}",
@@ -165,16 +177,23 @@ class SessionReportWriter:
             f"Dispositivo: {device_label}",
             f"Ruta dispositivo: {device_path}",
             f"Origen: {source_label}",
-            f"Inicio: {started_at.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"Fin: {finished_at.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"Formato destino: {options.output_format.value.upper()}",
-            f"Bitrate: {options.bitrate.description}",
-            f"Sample rate: {options.sample_rate.description}",
-            f"Metadatos: {'Si' if options.preserve_metadata else 'No'}",
-            f"Total: {batch.total} | Exito: {batch.success} | Fallos: {batch.failed} | Omitidos: {batch.skipped}",
-            "",
-            "Archivos:",
         ]
+        if destination_label:
+            lines.append(f"Destino: {destination_label}")
+        lines.extend(
+            [
+                f"Inicio: {started_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Fin: {finished_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Formato destino: {options.output_format.value.upper()}",
+                f"Bitrate: {options.bitrate.description}",
+                f"Sample rate: {options.sample_rate.description}",
+                f"Metadatos: {'Si' if options.preserve_metadata else 'No'}",
+                f"Carpeta salida: {options.output_dir}",
+                f"Total: {batch.total} | Exito: {batch.success} | Fallos: {batch.failed} | Omitidos: {batch.skipped}",
+                "",
+                "Archivos:",
+            ]
+        )
         for result in batch.results:
             status = "OK" if result.success else "ERROR"
             out = result.output_path or "-"
@@ -194,6 +213,7 @@ class SessionReportWriter:
         source_label: str,
         files: list[Path],
         options: ConversionOptions,
+        destination_label: str = "",
     ) -> str:
         groups: dict[str, int] = {}
         total_size = 0
@@ -209,15 +229,21 @@ class SessionReportWriter:
             f"Dispositivo: {device_label}",
             f"Ruta: {device_path}",
             f"Origen: {source_label}",
-            f"Archivos: {len(files)}",
-            f"Tamaño total: {format_size(total_size)}",
-            f"Formato destino: {options.output_format.value.upper()}",
-            f"Bitrate: {options.bitrate.description}",
-            f"Sample rate: {options.sample_rate.description}",
-            f"Conservar metadatos: {'Sí' if options.preserve_metadata else 'No'}",
-            f"Salida: {options.output_dir}",
-            "Por formato origen:",
         ]
+        if destination_label:
+            lines.append(f"Destino: {destination_label}")
+        lines.extend(
+            [
+                f"Archivos: {len(files)}",
+                f"Tamaño total: {format_size(total_size)}",
+                f"Formato destino: {options.output_format.value.upper()}",
+                f"Bitrate: {options.bitrate.description}",
+                f"Sample rate: {options.sample_rate.description}",
+                f"Conservar metadatos: {'Sí' if options.preserve_metadata else 'No'}",
+                f"Salida: {options.output_dir}",
+                "Por formato origen:",
+            ]
+        )
         for ext, count in sorted(groups.items()):
             lines.append(f"  - {ext.upper()}: {count}")
         if len(files) <= 15:

@@ -3,16 +3,21 @@
 import json
 import os
 import platform
-import shutil
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from enum import Enum
 
-from platformdirs import user_data_dir, user_config_dir
+from platformdirs import user_config_dir
+
+from src.utils.helpers import sanitize_filename
 
 
 APP_NAME = "AudioConverter"
 APP_AUTHOR = "AFC"
+REMOVABLE_PC_FOLDER = "from_removable"
+USB_CONVERTED_PREFIX = "AFC_Converted"
 
 
 class EnvironmentType(Enum):
@@ -171,3 +176,55 @@ class PathManager:
     @username.setter
     def username(self, value: str) -> None:
         self.set("username", value)
+
+    @property
+    def from_removable_dir(self) -> Path:
+        return self.converted_dir / REMOVABLE_PC_FOLDER
+
+    def removable_pc_session_dir(
+        self,
+        device_label: str,
+        when: Optional[datetime] = None,
+        *,
+        create: bool = True,
+    ) -> Path:
+        """Carpeta PC para conversiones desde extraíble: converted/from_removable/<disp>/<fecha>/"""
+        stamp = (when or datetime.now()).strftime("%Y-%m-%d_%H%M%S")
+        safe = sanitize_filename(device_label) or "USB"
+        safe = re.sub(r"\s+", "_", safe).strip("._") or "USB"
+        session = self.from_removable_dir / safe / stamp
+        if create:
+            session.mkdir(parents=True, exist_ok=True)
+        return session
+
+    @staticmethod
+    def removable_usb_session_dir(
+        files: list[Path],
+        device_root: Path,
+        when: Optional[datetime] = None,
+        *,
+        create: bool = True,
+    ) -> Path:
+        """Carpeta en el USB junto al origen: <origen>/AFC_Converted_<timestamp>/"""
+        stamp = (when or datetime.now()).strftime("%Y%m%d_%H%M%S")
+        root = Path(device_root).resolve()
+        if not files:
+            parent = root
+        elif len(files) == 1:
+            parent = Path(files[0]).resolve().parent
+        else:
+            parents = [str(Path(p).resolve().parent) for p in files]
+            try:
+                parent = Path(os.path.commonpath(parents))
+            except ValueError:
+                parent = Path(files[0]).resolve().parent
+
+        try:
+            parent.resolve().relative_to(root)
+        except ValueError:
+            parent = root
+
+        session = parent / f"{USB_CONVERTED_PREFIX}_{stamp}"
+        if create:
+            session.mkdir(parents=True, exist_ok=True)
+        return session

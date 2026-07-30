@@ -27,6 +27,8 @@ main.py
 | Recurso | Ubicación por defecto |
 |---------|------------------------|
 | Convertidos | `~/AudioConverter/converted/<formato>/` |
+| Desde USB → PC | `~/AudioConverter/converted/from_removable/<disp>/<fecha>/<formato>/` |
+| Desde USB → USB | `<origen>/AFC_Converted_<fecha>/<formato>/` (modo limpio, sin historial PC) |
 | Historial | `~/AudioConverter/database/afc.db` |
 | Exportaciones | `~/AudioConverter/exports/` |
 | Config | config de usuario (`platformdirs`) |

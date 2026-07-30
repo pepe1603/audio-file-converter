@@ -84,9 +84,15 @@ python src/main.py
 
 1. Detecta unidades extraíbles conectadas.
 2. Permite navegar el árbol del dispositivo hasta un máximo de **5 niveles** desde la raíz.
-3. Convierte un archivo o un lote (carpeta actual o con subcarpetas dentro del límite).
-4. Muestra resumen **antes** y **después** de la conversión.
-5. Crea/actualiza reportes en `exports/usb_conversion_summary.md` y `.txt`.
+3. Elige destino de las conversiones:
+   - **1 — En el PC:** `converted/from_removable/<dispositivo>/<fecha>/<formato>/`
+     (historial y reportes en el PC como de costumbre).
+   - **2 — En el mismo USB (modo limpio):** carpeta `AFC_Converted_<fecha>/` junto al
+     origen en el dispositivo; **no** escribe historial ni exports en el PC. Solo quedan
+     los convertidos y un reporte MD/TXT dentro de esa carpeta del USB.
+4. Convierte un archivo o un lote (carpeta actual o con subcarpetas dentro del límite).
+5. Muestra resumen **antes** y **después** de la conversión.
+6. Reportes: en PC (`exports/usb_conversion_summary.*`) o solo en el USB según el destino.
 
 ## Estructura del proyecto
 

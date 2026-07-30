@@ -187,9 +187,28 @@ class Menus:
             self.console.print("[yellow]No hay archivos de audio para convertir[/yellow]")
             return
 
+        destination = self._ask_usb_destination()
+        if destination is None:
+            return
+
         options = self._ask_conversion_options()
         if options is None:
             return
+
+        started_at = datetime.now()
+        save_on_pc = destination == "pc"
+        if save_on_pc:
+            output_dir = self.paths.removable_pc_session_dir(
+                device.label, when=started_at, create=False
+            )
+            dest_label = f"PC → {output_dir}"
+        else:
+            output_dir = self.paths.removable_usb_session_dir(
+                files, device.path, when=started_at, create=False
+            )
+            dest_label = f"USB (modo limpio) → {output_dir}"
+
+        options = options.model_copy(update={"output_dir": output_dir})
 
         pre = SessionReportWriter.format_pre_summary(
             device_label=device.label,
@@ -197,6 +216,7 @@ class Menus:
             source_label=source_label,
             files=files,
             options=options,
+            destination_label=dest_label,
         )
         self.console.print("\n[bold]Resumen previo a la conversión[/bold]")
         self.console.print(Panel(pre, box=box.ROUNDED, title="Antes", border_style="cyan"))
@@ -205,13 +225,21 @@ class Menus:
             self.console.print("[yellow]Conversión cancelada[/yellow]")
             return
 
-        started_at = datetime.now()
-        batch = self._execute_conversion_batch(files, options)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        batch = self._execute_conversion_batch(
+            files,
+            options,
+            record_history=save_on_pc,
+            progress_label="USB",
+        )
         finished_at = datetime.now()
 
         self._print_post_summary(batch, options)
 
-        md_path, txt_path = self.session_reports.write_session(
+        report_dir = self.paths.exports_dir if save_on_pc else output_dir
+        reporter = SessionReportWriter(report_dir)
+        md_path, txt_path = reporter.write_session(
             device_label=device.label,
             device_path=device.path,
             source_label=source_label,
@@ -221,10 +249,46 @@ class Menus:
             username=self.paths.username,
             started_at=started_at,
             finished_at=finished_at,
+            destination_label=dest_label,
         )
-        self.console.print("\n[green]✓ Reportes actualizados[/green]")
+        if save_on_pc:
+            self.console.print("\n[green]✓ Reportes actualizados en PC[/green]")
+        else:
+            self.console.print(
+                "\n[green]✓ Modo limpio: solo archivos convertidos y reporte en el USB[/green]"
+            )
+            self.console.print("[dim]Sin historial ni residuos en el PC[/dim]")
         self.console.print(f"[dim]MD:  {md_path}[/dim]")
         self.console.print(f"[dim]TXT: {txt_path}[/dim]")
+        self.console.print(f"[dim]Salida: {output_dir}[/dim]")
+
+    def _ask_usb_destination(self) -> Optional[str]:
+        """Submenú: dónde guardar las conversiones desde extraíble."""
+        self.console.print("\n[bold]¿Dónde guardar las conversiones?[/bold]\n")
+        table = Table(box=box.ROUNDED, show_header=False)
+        table.add_column("Opción", style="cyan", justify="center", width=8)
+        table.add_column("Destino", style="white")
+        table.add_row(
+            "1",
+            "En el PC — carpeta from_removable/<dispositivo>/<fecha>/<formato>/",
+        )
+        table.add_row(
+            "2",
+            "En el mismo USB — carpeta AFC_Converted_<fecha> junto al origen (modo limpio)",
+        )
+        table.add_row("0", "Cancelar")
+        self.console.print(table)
+        self.console.print(
+            "[dim]Modo limpio (2): no escribe historial, exports ni basura en el PC; "
+            "solo convierte y guarda en el USB.[/dim]\n"
+        )
+
+        choice = Prompt.ask("Seleccione", choices=["0", "1", "2"], default="1")
+        if choice == "0":
+            return None
+        if choice == "1":
+            return "pc"
+        return "usb"
 
     def _select_removable_device(self) -> Optional[RemovableDevice]:
         while True:
@@ -393,10 +457,13 @@ class Menus:
         self,
         files: list[Path],
         options: ConversionOptions,
+        *,
+        record_history: bool = True,
+        progress_label: str = "Lote",
     ) -> BatchConversionResult:
         self.console.print(f"\n[cyan]Convirtiendo {len(files)} archivo(s)...[/cyan]")
         with batch_progress(self.console) as progress:
-            task = progress.add_task("USB", total=len(files))
+            task = progress.add_task(progress_label, total=len(files))
 
             def on_item(index: int, total: int, path: Path) -> None:
                 progress.update(task, completed=index - 1, description=path.name)
@@ -404,12 +471,13 @@ class Menus:
             batch = self.converter.convert_batch(files, options, progress_callback=on_item)
             progress.update(task, completed=len(files), description="Completado")
 
-        for result in batch.results:
-            self.history.add_from_result(
-                result,
-                username=self.paths.username,
-                sample_rate=options.sample_rate.value,
-            )
+        if record_history:
+            for result in batch.results:
+                self.history.add_from_result(
+                    result,
+                    username=self.paths.username,
+                    sample_rate=options.sample_rate.value,
+                )
         return batch
 
     def _print_post_summary(
