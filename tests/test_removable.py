@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.core.removable import MAX_TREE_DEPTH, RemovableMediaManager
-from src.core.session_report import SessionReportWriter
+from src.core.session_report import ReportFormat, SessionReportWriter
 from src.models.audio_file import AudioFormat, BitratePreset, SampleRatePreset
 from src.models.conversion import BatchConversionResult, ConversionOptions, ConversionResult
 from src.utils.paths import USB_CONVERTED_PREFIX, PathManager
@@ -60,8 +60,7 @@ def test_list_directory_filters_audio(tmp_path: Path):
     assert "no.txt" not in names
 
 
-def test_session_report_create_and_update(tmp_path: Path):
-    writer = SessionReportWriter(tmp_path / "exports")
+def _sample_batch(tmp_path: Path):
     options = ConversionOptions(
         output_format=AudioFormat.MP3,
         bitrate=BitratePreset.B192,
@@ -82,9 +81,15 @@ def test_session_report_create_and_update(tmp_path: Path):
         status="success",
     )
     batch = BatchConversionResult(total=1, success=1, failed=0, skipped=0, results=[result])
-    from datetime import datetime
+    return options, src, batch
 
-    md1, txt1 = writer.write_session(
+
+def test_session_report_single_md_file(tmp_path: Path):
+    writer = SessionReportWriter(tmp_path / "exports", ReportFormat.MD)
+    options, src, batch = _sample_batch(tmp_path)
+
+    path1 = writer.write_session(
+        mode="USB / extraíble",
         device_label="USB TEST",
         device_path=tmp_path,
         source_label="Archivo: a.wav",
@@ -94,14 +99,15 @@ def test_session_report_create_and_update(tmp_path: Path):
         username="Tester",
         started_at=datetime.now(),
     )
-    assert md1.exists() and txt1.exists()
-    content1 = md1.read_text(encoding="utf-8")
+    assert path1.exists()
+    assert path1.name == "conversion_report.md"
+    assert not (tmp_path / "exports" / "conversion_report.txt").exists()
+    content1 = path1.read_text(encoding="utf-8")
     assert "USB TEST" in content1
     assert "a.wav" in content1
 
     writer.write_session(
-        device_label="USB TEST",
-        device_path=tmp_path,
+        mode="Archivo único",
         source_label="Archivo: a.wav",
         files=[src],
         options=options,
@@ -109,15 +115,37 @@ def test_session_report_create_and_update(tmp_path: Path):
         username="Tester",
         started_at=datetime.now(),
     )
-    content2 = md1.read_text(encoding="utf-8")
+    content2 = path1.read_text(encoding="utf-8")
     assert content2.count("## Sesión") == 2
-    assert MAX_TREE_DEPTH == 5
+
+
+def test_session_report_single_txt_file(tmp_path: Path):
+    writer = SessionReportWriter(tmp_path / "exports", ReportFormat.TXT)
+    options, src, batch = _sample_batch(tmp_path)
+    path = writer.write_session(
+        mode="Lote",
+        source_label="2 archivos",
+        files=[src],
+        options=options,
+        batch=batch,
+        username="Tester",
+        started_at=datetime.now(),
+    )
+    assert path.name == "conversion_report.txt"
+    assert "SESION" in path.read_text(encoding="utf-8")
+    assert not (tmp_path / "exports" / "conversion_report.md").exists()
+
+
+def test_report_format_from_config():
+    assert ReportFormat.from_config("md") is ReportFormat.MD
+    assert ReportFormat.from_config("TXT") is ReportFormat.TXT
+    assert ReportFormat.from_config(None) is ReportFormat.MD
 
 
 def test_removable_pc_session_dir(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(PathManager, "_detect_environment", lambda self: __import__(
-        "src.utils.paths", fromlist=["EnvironmentType"]
-    ).EnvironmentType.WINDOWS)
+    from src.utils.paths import EnvironmentType
+
+    monkeypatch.setattr(PathManager, "_detect_environment", lambda self: EnvironmentType.WINDOWS)
     monkeypatch.setattr(PathManager, "_resolve_base_path", lambda self: tmp_path / "AudioConverter")
     monkeypatch.setattr(
         PathManager,
@@ -158,3 +186,4 @@ def test_removable_usb_session_dir_common_parent(tmp_path: Path):
     )
     assert session == album / f"{USB_CONVERTED_PREFIX}_20260102_030405"
     assert not session.exists()
+    assert MAX_TREE_DEPTH == 5

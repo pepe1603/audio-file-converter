@@ -27,6 +27,7 @@ class ConversionOptions(BaseModel):
     sample_rate: SampleRatePreset = SampleRatePreset.ORIGINAL
     preserve_metadata: bool = True
     output_dir: Optional[Path] = None
+    flat_output: bool = False
 
     @field_validator("output_dir", mode="before")
     @classmethod

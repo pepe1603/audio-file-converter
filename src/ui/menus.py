@@ -24,7 +24,7 @@ from src.core.history import HistoryService
 from src.core.metadata import MetadataHandler
 from src.core.removable import MAX_TREE_DEPTH, RemovableDevice, RemovableMediaManager
 from src.core.scanner import AudioScanner
-from src.core.session_report import SessionReportWriter
+from src.core.session_report import ReportFormat, SessionReportWriter
 from src.core.validator import Validator
 from src.ui.progress import batch_progress, conversion_progress
 from src.utils.helpers import format_duration, format_size
@@ -52,7 +52,48 @@ class Menus:
         self.exporter = exporter
         self.scanner = scanner
         self.removable = RemovableMediaManager(max_depth=MAX_TREE_DEPTH)
-        self.session_reports = SessionReportWriter(self.paths.exports_dir)
+
+    def _report_writer(self, directory: Optional[Path] = None) -> SessionReportWriter:
+        fmt = ReportFormat.from_config(self.paths.report_format)
+        return SessionReportWriter(directory or self.paths.exports_dir, fmt)
+
+    def _write_conversion_report(
+        self,
+        *,
+        mode: str,
+        source_label: str,
+        files: list[Path],
+        options: ConversionOptions,
+        batch: BatchConversionResult,
+        started_at: datetime,
+        finished_at: Optional[datetime] = None,
+        device_label: str = "",
+        device_path: Optional[Path] = None,
+        destination_label: str = "",
+        report_dir: Optional[Path] = None,
+        announce: bool = True,
+    ) -> Path:
+        writer = self._report_writer(report_dir)
+        path = writer.write_session(
+            mode=mode,
+            source_label=source_label,
+            files=files,
+            options=options,
+            batch=batch,
+            username=self.paths.username,
+            started_at=started_at,
+            finished_at=finished_at,
+            device_label=device_label,
+            device_path=device_path,
+            destination_label=destination_label,
+            write_session_copy=False,
+        )
+        if announce:
+            self.console.print(
+                f"\n[green]✓ Reporte {writer.report_format.label} actualizado[/green]"
+            )
+            self.console.print(f"[dim]{path}[/dim]")
+        return path
 
     def show_main_menu(self) -> None:
         self.console.print("\n[bold]═══ MENÚ PRINCIPAL ═══[/bold]\n")
@@ -88,6 +129,7 @@ class Menus:
         if options is None:
             return
 
+        started_at = datetime.now()
         self.console.print("\n[cyan]Conversión iniciada...[/cyan]")
         with conversion_progress(self.console) as progress:
             task = progress.add_task("Convirtiendo", total=1.0)
@@ -96,6 +138,7 @@ class Menus:
                 progress.update(task, completed=value)
 
             result = self.converter.convert(path, options, progress_callback=on_progress)
+        finished_at = datetime.now()
 
         self.history.add_from_result(
             result,
@@ -108,6 +151,16 @@ class Menus:
             self.console.print(f"[dim]Archivo generado: {result.output_path}[/dim]")
         else:
             self.console.print(f"\n[red]✗ Error: {result.error_message}[/red]")
+
+        self._write_conversion_report(
+            mode="Archivo único",
+            source_label=f"Archivo: {path}",
+            files=[path],
+            options=options,
+            batch=SessionReportWriter.batch_from_result(result),
+            started_at=started_at,
+            finished_at=finished_at,
+        )
 
     def convert_multiple(self) -> None:
         self.console.print("\n[bold cyan]═══ CONVERTIR VARIOS ARCHIVOS ═══[/bold cyan]\n")
@@ -136,7 +189,7 @@ class Menus:
             self.console.print("[yellow]No se agregaron archivos válidos[/yellow]")
             return
 
-        self._run_batch(files)
+        self._run_batch(files, mode="Varios archivos")
 
     def convert_folder(self) -> None:
         self.console.print("\n[bold cyan]═══ CONVERTIR CARPETA ═══[/bold cyan]\n")
@@ -166,7 +219,7 @@ class Menus:
         if not Confirm.ask("\n¿Iniciar conversión?", default=True):
             return
 
-        self._run_batch(files)
+        self._run_batch(files, mode="Carpeta")
 
     def convert_from_usb(self) -> None:
         self.console.print("\n[bold cyan]═══ CONVERTIR DESDE USB / EXTRAÍBLE ═══[/bold cyan]\n")
@@ -208,7 +261,7 @@ class Menus:
             )
             dest_label = f"USB (modo limpio) → {output_dir}"
 
-        options = options.model_copy(update={"output_dir": output_dir})
+        options = options.model_copy(update={"output_dir": output_dir, "flat_output": True})
 
         pre = SessionReportWriter.format_pre_summary(
             device_label=device.label,
@@ -238,28 +291,23 @@ class Menus:
         self._print_post_summary(batch, options)
 
         report_dir = self.paths.exports_dir if save_on_pc else output_dir
-        reporter = SessionReportWriter(report_dir)
-        md_path, txt_path = reporter.write_session(
-            device_label=device.label,
-            device_path=device.path,
+        self._write_conversion_report(
+            mode="USB / extraíble",
             source_label=source_label,
             files=files,
             options=options,
             batch=batch,
-            username=self.paths.username,
             started_at=started_at,
             finished_at=finished_at,
+            device_label=device.label,
+            device_path=device.path,
             destination_label=dest_label,
+            report_dir=report_dir,
         )
-        if save_on_pc:
-            self.console.print("\n[green]✓ Reportes actualizados en PC[/green]")
-        else:
+        if not save_on_pc:
             self.console.print(
-                "\n[green]✓ Modo limpio: solo archivos convertidos y reporte en el USB[/green]"
+                "[dim]Modo limpio: sin historial ni residuos en el PC[/dim]"
             )
-            self.console.print("[dim]Sin historial ni residuos en el PC[/dim]")
-        self.console.print(f"[dim]MD:  {md_path}[/dim]")
-        self.console.print(f"[dim]TXT: {txt_path}[/dim]")
         self.console.print(f"[dim]Salida: {output_dir}[/dim]")
 
     def _ask_usb_destination(self) -> Optional[str]:
@@ -270,17 +318,17 @@ class Menus:
         table.add_column("Destino", style="white")
         table.add_row(
             "1",
-            "En el PC — carpeta from_removable/<dispositivo>/<fecha>/<formato>/",
+            "En el PC — una sola carpeta: from_removable/<dispositivo>/<fecha>/",
         )
         table.add_row(
             "2",
-            "En el mismo USB — carpeta AFC_Converted_<fecha> junto al origen (modo limpio)",
+            "En el mismo USB — una sola carpeta AFC_Converted_<fecha> junto al origen",
         )
         table.add_row("0", "Cancelar")
         self.console.print(table)
         self.console.print(
-            "[dim]Modo limpio (2): no escribe historial, exports ni basura en el PC; "
-            "solo convierte y guarda en el USB.[/dim]\n"
+            "[dim]En ambos casos los archivos van directos a esa carpeta (sin subcarpetas "
+            "por formato). Modo USB (2): sin historial ni residuos en el PC.[/dim]\n"
         )
 
         choice = Prompt.ask("Seleccione", choices=["0", "1", "2"], default="1")
@@ -622,13 +670,14 @@ class Menus:
             self.console.print("[yellow]No hay conversiones para exportar[/yellow]")
             return
 
-        self.console.print(f"[dim]Total: {len(records)}[/dim]\n")
+        preferred = ReportFormat.from_config(self.paths.report_format)
+        self.console.print(f"[dim]Total: {len(records)} | Formato preferido: {preferred.label}[/dim]\n")
         table = Table(box=box.SIMPLE, show_header=False)
         table.add_column("Opción", style="cyan", justify="center")
         table.add_column("Formato")
-        table.add_row("1", "TXT")
-        table.add_row("2", "Markdown")
-        table.add_row("3", "JSON")
+        table.add_row("1", f"Usar preferido ({preferred.label})")
+        table.add_row("2", "TXT")
+        table.add_row("3", "Markdown")
         table.add_row("0", "Regresar")
         self.console.print(table)
 
@@ -636,31 +685,35 @@ class Menus:
         if choice == "0":
             return
 
+        if choice == "1":
+            fmt = preferred
+        elif choice == "2":
+            fmt = ReportFormat.TXT
+        else:
+            fmt = ReportFormat.MD
+
         self.paths.exports_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        if choice == "1":
-            output = self.paths.exports_dir / f"historial_{stamp}.txt"
+        output = self.paths.exports_dir / f"historial_{stamp}.{fmt.extension}"
+        if fmt is ReportFormat.TXT:
             ok = self.exporter.export_to_txt(records, output)
-        elif choice == "2":
-            output = self.paths.exports_dir / f"historial_{stamp}.md"
-            ok = self.exporter.export_to_markdown(records, output)
         else:
-            output = self.paths.exports_dir / f"historial_{stamp}.json"
-            ok = self.exporter.export_to_json(records, output)
+            ok = self.exporter.export_to_markdown(records, output)
 
         if ok:
-            self.console.print(f"\n[green]✓ Historial exportado[/green]")
+            self.console.print("\n[green]✓ Historial exportado[/green]")
             self.console.print(f"[dim]{output}[/dim]")
         else:
             self.console.print("\n[red]✗ Error al exportar[/red]")
 
     def settings_menu(self) -> None:
         while True:
+            preferred = ReportFormat.from_config(self.paths.report_format)
             self.console.print("\n[bold cyan]═══ CONFIGURACIÓN ═══[/bold cyan]\n")
             self.console.print(f"[bold]Entorno:[/bold] {self.paths.display_name}")
             self.console.print(f"[bold]Usuario:[/bold] {self.paths.username}")
             self.console.print(f"[bold]Carpeta de salida:[/bold] {self.paths.converted_dir}")
+            self.console.print(f"[bold]Formato de reporte:[/bold] {preferred.label}")
             self.console.print(f"[bold]Base de datos:[/bold] {self.paths.database_path}")
             self.console.print(f"[bold]Config:[/bold] {self.paths.config_file}")
 
@@ -670,15 +723,16 @@ class Menus:
             table.add_row("1", "Ver carpeta de salida")
             table.add_row("2", "Cambiar carpeta de salida")
             table.add_row("3", "Cambiar usuario")
-            table.add_row("4", "Verificar FFmpeg")
-            table.add_row("5", "Verificar base de datos")
-            table.add_row("6", "Restablecer configuración")
+            table.add_row("4", "Formato de reporte (TXT / Markdown)")
+            table.add_row("5", "Verificar FFmpeg")
+            table.add_row("6", "Verificar base de datos")
+            table.add_row("7", "Restablecer configuración")
             table.add_row("0", "Regresar")
             self.console.print(table)
 
             choice = Prompt.ask(
                 "Seleccione",
-                choices=["0", "1", "2", "3", "4", "5", "6"],
+                choices=["0", "1", "2", "3", "4", "5", "6", "7"],
                 default="0",
             )
             if choice == "0":
@@ -697,28 +751,54 @@ class Menus:
                     self.paths.username = name
                     self.console.print(f"[green]✓ Usuario: {name}[/green]")
             elif choice == "4":
-                DependencyChecker.show_status(self.console)
+                self._change_report_format()
             elif choice == "5":
+                DependencyChecker.show_status(self.console)
+            elif choice == "6":
                 exists = self.paths.database_path.exists()
                 total = self.history.total()
                 icon = "[green]✓[/green]" if exists else "[red]✗[/red]"
                 self.console.print(f"{icon} DB: {self.paths.database_path}")
                 self.console.print(f"[dim]Registros: {total}[/dim]")
-            elif choice == "6":
+            elif choice == "7":
                 if Confirm.ask("¿Restablecer configuración?", default=False):
                     self.paths.reset_config()
                     self.converter.default_output_dir = self.paths.converted_dir
                     self.console.print("[green]✓ Configuración restablecida[/green]")
 
+    def _change_report_format(self) -> None:
+        current = ReportFormat.from_config(self.paths.report_format)
+        self.console.print("\n[bold]Formato del reporte único del programa[/bold]")
+        self.console.print(
+            "[dim]Se usa un solo archivo conversion_report.* en exports/ "
+            "(y en USB en modo limpio).[/dim]\n"
+        )
+        table = Table(box=box.SIMPLE, show_header=False)
+        table.add_column("Opción", style="cyan", justify="center")
+        table.add_column("Formato")
+        table.add_row("1", "Markdown (.md)")
+        table.add_row("2", "TXT (.txt)")
+        table.add_row("0", "Cancelar")
+        self.console.print(table)
+        default = "1" if current is ReportFormat.MD else "2"
+        choice = Prompt.ask("Seleccione", choices=["0", "1", "2"], default=default)
+        if choice == "0":
+            return
+        fmt = ReportFormat.MD if choice == "1" else ReportFormat.TXT
+        self.paths.report_format = fmt.value
+        self.console.print(f"[green]✓ Formato de reporte: {fmt.label}[/green]")
+        self.console.print(f"[dim]Archivo: {self.paths.exports_dir / f'conversion_report.{fmt.extension}'}[/dim]")
+
     def check_dependencies(self) -> None:
         self.console.print("\n[bold cyan]═══ VERIFICAR DEPENDENCIAS ═══[/bold cyan]\n")
         DependencyChecker.show_status(self.console)
 
-    def _run_batch(self, files: list[Path]) -> None:
+    def _run_batch(self, files: list[Path], *, mode: str = "Lote") -> None:
         options = self._ask_conversion_options()
         if options is None:
             return
 
+        started_at = datetime.now()
         self.console.print(f"\n[cyan]Convirtiendo {len(files)} archivos...[/cyan]")
         with batch_progress(self.console) as progress:
             task = progress.add_task("Lote", total=len(files))
@@ -728,6 +808,7 @@ class Menus:
 
             batch = self.converter.convert_batch(files, options, progress_callback=on_item)
             progress.update(task, completed=len(files), description="Completado")
+        finished_at = datetime.now()
 
         for result in batch.results:
             self.history.add_from_result(
@@ -742,6 +823,15 @@ class Menus:
             f"[yellow]Omitidos: {batch.skipped}[/yellow]"
         )
         self.console.print(f"[dim]Salida: {self.paths.converted_dir}[/dim]")
+        self._write_conversion_report(
+            mode=mode,
+            source_label=f"{len(files)} archivo(s)",
+            files=files,
+            options=options,
+            batch=batch,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
 
     def _ask_conversion_options(self) -> Optional[ConversionOptions]:
         fmt = self._select_format()

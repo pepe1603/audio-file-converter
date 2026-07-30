@@ -2,13 +2,18 @@
 
 CLI multiplataforma para convertir archivos de audio entre múltiples formatos usando FFmpeg.
 
+**Versión estable:** `1.1.0`
+
 ## Características
 
 - Conversión entre múltiples formatos de audio
 - Conversión por lotes y de carpetas completas
+- Conversión desde USB / dispositivos extraíbles
 - Preservar y editar metadatos (Mutagen)
 - Cambiar bitrate y frecuencia de muestreo
-- Historial SQLite con exportación (TXT, Markdown, JSON)
+- Historial SQLite con exportación (TXT / Markdown)
+- Reporte único acumulativo (`conversion_report.md` o `.txt`)
+- Banners legendarios de entrada y salida (adaptativos al terminal)
 - Interfaz CLI profesional con Rich
 - Multiplataforma: Windows / Linux / macOS / Termux
 
@@ -84,15 +89,21 @@ python src/main.py
 
 1. Detecta unidades extraíbles conectadas.
 2. Permite navegar el árbol del dispositivo hasta un máximo de **5 niveles** desde la raíz.
-3. Elige destino de las conversiones:
-   - **1 — En el PC:** `converted/from_removable/<dispositivo>/<fecha>/<formato>/`
-     (historial y reportes en el PC como de costumbre).
-   - **2 — En el mismo USB (modo limpio):** carpeta `AFC_Converted_<fecha>/` junto al
-     origen en el dispositivo; **no** escribe historial ni exports en el PC. Solo quedan
-     los convertidos y un reporte MD/TXT dentro de esa carpeta del USB.
+3. Elige destino de las conversiones (en ambos casos **una sola carpeta**, sin subcarpetas por formato):
+   - **1 — En el PC:** `converted/from_removable/<dispositivo>/<fecha>/`
+     (historial y reporte único en el PC).
+   - **2 — En el mismo USB (modo limpio):** `AFC_Converted_<fecha>/` junto al origen;
+     **no** escribe historial ni exports en el PC. Solo convertidos + un reporte.
 4. Convierte un archivo o un lote (carpeta actual o con subcarpetas dentro del límite).
 5. Muestra resumen **antes** y **después** de la conversión.
-6. Reportes: en PC (`exports/usb_conversion_summary.*`) o solo en el USB según el destino.
+
+### Reporte único
+
+Todas las conversiones (archivo, lote, carpeta, USB) actualizan **un solo archivo**:
+
+- `~/AudioConverter/exports/conversion_report.md` **o** `.txt`
+- Formato elegido en **Configuración → Formato de reporte**
+- USB modo limpio: el mismo formato, pero dentro de la carpeta del USB
 
 ## Estructura del proyecto
 

@@ -132,7 +132,10 @@ class AudioConverter:
     def _resolve_output_path(self, input_path: Path, options: ConversionOptions) -> Path:
         fmt = options.output_format.value
         base_dir = options.output_dir or self.default_output_dir or input_path.parent
-        output_dir = Path(base_dir) / fmt
+        if options.flat_output:
+            output_dir = Path(base_dir)
+        else:
+            output_dir = Path(base_dir) / fmt
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{input_path.stem}.{fmt}"
         return unique_path(output_path)

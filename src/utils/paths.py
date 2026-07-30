@@ -132,7 +132,11 @@ class PathManager:
                 "default_sample_rate": "original",
                 "preserve_metadata": True,
                 "username": "Usuario",
+                "report_format": "md",
             }
+            self._save_config()
+        if "report_format" not in self._config:
+            self._config["report_format"] = "md"
             self._save_config()
 
     def _save_config(self) -> None:
@@ -165,6 +169,7 @@ class PathManager:
             "default_sample_rate": "original",
             "preserve_metadata": True,
             "username": self._config.get("username", "Usuario"),
+            "report_format": self._config.get("report_format", "md"),
         }
         self._save_config()
         self.ensure_directories()
@@ -176,6 +181,16 @@ class PathManager:
     @username.setter
     def username(self, value: str) -> None:
         self.set("username", value)
+
+    @property
+    def report_format(self) -> str:
+        value = str(self._config.get("report_format", "md")).strip().lower()
+        return "txt" if value in {"txt", "text", "plain"} else "md"
+
+    @report_format.setter
+    def report_format(self, value: str) -> None:
+        raw = str(value).strip().lower()
+        self.set("report_format", "txt" if raw in {"txt", "text", "plain"} else "md")
 
     @property
     def from_removable_dir(self) -> Path:
